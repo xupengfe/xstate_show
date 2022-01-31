@@ -70,6 +70,7 @@ enum xfeature {
 #define XSAVE_HDR_OFFSET	512
 #define XSAVE_HDR_SIZE		64
 void *aligned_alloc(size_t alignment, size_t size);
+void err(int eval, const char *fmt, ...);
 
 /* err() exits and will not return */
 #define fatal_error(msg, ...)	err(1, "[FAIL]\t" msg, ##__VA_ARGS__)
