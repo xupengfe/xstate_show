@@ -142,9 +142,9 @@ static int test_process_switch(void)
 	unsigned char *buf3 = (unsigned char *)xstate_buf3;
 	uint64_t xsave_mask = xsave_test_mask;
 
-	xrstor((struct xsave_buffer *)buf0, xsave_mask);
+	//xrstor((struct xsave_buffer *)buf0, xsave_mask);
 	/* Child process performs process switching by forking grandchild process */
-	grandchild = __fork();
+	grandchild = xsave_fork_test(buf0, buf3, xsave_mask);
 	if (grandchild < 0)
 		fatal_error("grandchild fork failed\n");
 	else if (grandchild == 0) {
@@ -159,7 +159,7 @@ static int test_process_switch(void)
 			!WIFEXITED(status))
 			fatal_error("Grandchild exit with error status");
 		else {
-			xsave((struct xsave_buffer *)buf3, xsave_mask);
+			//xsave((struct xsave_buffer *)buf3, xsave_mask);
 			printf("\tChild:%d check xstate with mask:0x%lx after process switching\n",
 				getpid(), xsave_test_mask);
 			if (compare_buf((unsigned char *)xstate_buf0,
