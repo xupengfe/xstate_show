@@ -381,7 +381,7 @@ static inline void wrpkru(uint32_t pkey)
 	     : : "a" (pkey), "c" (ecx), "d" (edx));
 }
 
-static void set_rand_xstate_data(struct xsave_buffer *buf, uint32_t xsave_mask)
+static void set_xstate_data(struct xsave_buffer *buf, uint32_t xsave_mask)
 {
 	unsigned char *ptr = (unsigned char *)buf;
 	/* MM offset and MM and XMM size is mandatory */
@@ -443,50 +443,35 @@ static inline long long execute_syscall(int syscall64_num, long long rdi,
 	return ret;
 }
 
-static inline long long xsave_fork_test(unsigned char *buf1, unsigned char *buf2,
-	uint64_t xsave_mask)
-{
-	long long ret;
-
-	/* Xrstor target xstate buffer in buf1 */
-	xrstor((struct xsave_buffer *)buf1, xsave_mask);
-
-	ret = execute_syscall((int)SYS_fork, 0, 0, 0, 0, 0, 0);
-
-	/* Save the xstates in buf2 */
-	xsave((struct xsave_buffer *)buf2, xsave_mask);
-
-	return ret;
-}
-
-static inline long long __fork(void)
+/*
+ * Because xstate like XMM, YMM registers are not preserved across function
+ * calls, so use inline function with assembly code only for fork test.
+ */
+static inline long long fork_test(struct xsave_buffer *buf, uint64_t xsave_mask)
 {
 	long long ret;
 
 	ret = execute_syscall((int)SYS_fork, 0, 0, 0, 0, 0, 0);
+
+	/* Save the xstates in buf */
+	xsave((struct xsave_buffer *)buf, xsave_mask);
 
 	return ret;
 }
 
 /*
  * Because xstate like XMM, YMM registers are not preserved across function
- * calls, so use inline function with assembly code only in this function.
+ * calls, so use inline function with assembly code only for singal test.
  */
-static inline long long xsave_syscall_test(unsigned char *buf1,
-	unsigned char *buf2, uint64_t xsave_mask ,int syscall64_num,
-	long long rdi, long long rsi, long long rdx, long long r10,
-	long long r8, long long r9)
+static inline long long sig_test(struct xsave_buffer *buf, uint64_t xsave_mask,
+	long long process_pid, long long SIG)
 {
 	long long ret;
 
-	/* Xrstor target xstate buffer in buf1 */
-	xrstor((struct xsave_buffer *)buf1, xsave_mask);
-
-	/* Execute target syscall */
-	ret = execute_syscall(syscall64_num, rdi, rsi, rdx, r10, r8, r9);
+	ret = execute_syscall((int)SYS_kill, process_pid, SIG, 0, 0, 0, 0);
 
 	/* Save the xstates in buf2 */
-	xsave((struct xsave_buffer *)buf2, xsave_mask);
+	xsave((struct xsave_buffer *)buf, xsave_mask);
 
 	return ret;
 }

@@ -81,11 +81,10 @@ static void usr1_pollute_xstate_handler(int signum, siginfo_t *info,
 	void *__ctxp)
 {
 	if (signum == SIGUSR1) {
-		set_rand_xstate_data(xstate_buf2, xsave_test_mask);
+		set_xstate_data(xstate_buf2, xsave_test_mask);
 		/* Xstate of SIGUSR1 handling is not affected by SIGUSR2 handling */
-		xsave_syscall_test((unsigned char *)xstate_buf2,
-			(unsigned char *)xstate_buf3, xsave_test_mask, (int)SYS_kill,
-			process_pid, SIGUSR2, 0, 0, 0, 0);
+		xrstor(xstate_buf2, xsave_test_mask);
+		sig_test(xstate_buf3, xsave_test_mask, process_pid, SIGUSR2);
 
 		if (compare_buf((unsigned char *)xstate_buf2,
 			(unsigned char *)xstate_buf3, xstate_size))
@@ -99,7 +98,7 @@ static void usr2_nested_pollute_xstate_handler(int signum, siginfo_t *info,
 	void *__ctxp)
 {
 	if (signum == SIGUSR2) {
-		set_rand_xstate_data(xstate_buf3, xsave_test_mask);
+		set_xstate_data(xstate_buf3, xsave_test_mask);
 		xrstor(xstate_buf3, xstate_size);
 	}
 }
@@ -111,14 +110,13 @@ static int test_xstate_sig_handle(void)
 	sethandler(SIGUSR1, usr1_pollute_xstate_handler, 0);
 	sethandler(SIGUSR2, usr2_nested_pollute_xstate_handler, 0);
 	printf("[RUN]\tCheck xstate around signal handling test.\n");
-	set_rand_xstate_data(xstate_buf0, xsave_test_mask);
+	set_xstate_data(xstate_buf0, xsave_test_mask);
 	validate_xstate_regs_same(xstate_buf0);
 
 	process_pid = getpid();
 	for (cycle_num = 1; cycle_num <= CYCLE_MAX_NUM; cycle_num++) {
-		xsave_syscall_test((unsigned char *)xstate_buf0,
-			(unsigned char *)xstate_buf1, xsave_test_mask, (int)SYS_kill,
-			process_pid, SIGUSR1, 0, 0, 0, 0);
+		xrstor(xstate_buf0, xsave_test_mask);
+		sig_test(xstate_buf1, xsave_test_mask, process_pid, SIGUSR1);
 		if (compare_buf((unsigned char *)xstate_buf0,
 				(unsigned char *)xstate_buf1, xstate_size)) {
 			fail_num++;
@@ -138,19 +136,16 @@ static int test_process_switch(void)
 {
 	pid_t grandchild;
 	int status;
-	unsigned char *buf0 = (unsigned char *)xstate_buf0;
-	unsigned char *buf3 = (unsigned char *)xstate_buf3;
-	uint64_t xsave_mask = xsave_test_mask;
 
-	//xrstor((struct xsave_buffer *)buf0, xsave_mask);
+	xrstor(xstate_buf0, xsave_test_mask);
 	/* Child process performs process switching by forking grandchild process */
-	grandchild = xsave_fork_test(buf0, buf3, xsave_mask);
+	grandchild = fork_test(xstate_buf3, xsave_test_mask);
 	if (grandchild < 0)
 		fatal_error("grandchild fork failed\n");
 	else if (grandchild == 0) {
 		/* fork syscall succeeded, now in the grandchild */
 		printf("\tGrandchild pid:%d changed it's own xstates\n", getpid());
-		set_rand_xstate_data(xstate_buf2, xsave_test_mask);
+		set_xstate_data(xstate_buf2, xsave_test_mask);
 		xrstor(xstate_buf2, xsave_test_mask);
 		_exit(0);
 	} else if (grandchild > 0) {
@@ -159,7 +154,6 @@ static int test_process_switch(void)
 			!WIFEXITED(status))
 			fatal_error("Grandchild exit with error status");
 		else {
-			//xsave((struct xsave_buffer *)buf3, xsave_mask);
 			printf("\tChild:%d check xstate with mask:0x%lx after process switching\n",
 				getpid(), xsave_test_mask);
 			if (compare_buf((unsigned char *)xstate_buf0,
@@ -187,9 +181,7 @@ static int test_xstate_fork(void)
 	 * save the xstate to xstate_buf1 in child process for comparison.
 	 */
 	xrstor(xstate_buf0, xsave_test_mask);
-	child = xsave_syscall_test((unsigned char *)xstate_buf0,
-			(unsigned char *)xstate_buf1, xsave_test_mask,
-			(int)SYS_fork, 0, 0, 0, 0, 0, 0);
+	child = fork_test(xstate_buf1, xsave_test_mask);
 	if (child < 0)
 		/* fork syscall failed */
 		fatal_error("fork failed");
