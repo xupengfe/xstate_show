@@ -194,7 +194,7 @@ static int test_xstate_fork(void)
 		fatal_error("fork failed");
 	else if (child == 0) {
 		/* fork syscall succeeded, now in the child. */
-		printf("[RUN]Check xstate of child processs in process switching\n");
+		printf("[RUN]\tCheck xstate of child processs in process switching\n");
 		if (memcmp(&xstate_buf0->bytes[0], &xstate_buf1->bytes[0], xstate_size))
 			printf("[FAIL]\tXstate of child process is not same as xstate of parent\n");
 		else
