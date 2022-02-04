@@ -307,18 +307,12 @@ static void fill_xstate_buf(char data, unsigned char *buf, int xstate_id)
 	}
 }
 
-/*
- * Populate FP with values, becaue avoid GCC generate wrong FP instructions,
- * Fill in FP xstate with instructions, and xsave into buffer.
- */
+/* Populate FP xstate with values by instruction. */
 static inline void prepare_fp_buf(uint32_t ui32_fp)
 {
 	uint64_t ui64_fp;
 
-	/*
-	 * Populate ui32_fp and ui64_fp and so on value onto FP registers stack
-	 * and FP ST/MM xstates
-	 */
+	/* Populate ui32_fp and ui64_fp value onto FP registers stack. */
 	ui64_fp = (uint64_t)ui32_fp << 32;
 	asm volatile("finit");
 	ui64_fp = ui64_fp + ui32_fp;
@@ -326,6 +320,7 @@ static inline void prepare_fp_buf(uint32_t ui32_fp)
 	asm volatile("flds %0" : : "m" (ui32_fp));
 }
 
+/* Write PKRU xstate with values by instruction. */
 static inline void wrpkru(uint32_t pkey)
 {
 	uint32_t ecx = 0, edx = 0;

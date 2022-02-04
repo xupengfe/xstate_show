@@ -135,7 +135,7 @@ static int test_xstate_sig_handle(void)
 	return 0;
 }
 
-static int test_process_switch(void)
+static int child_test_process_switch(void)
 {
 	pid_t grandchild;
 	int status;
@@ -152,8 +152,8 @@ static int test_process_switch(void)
 		set_xstate_data(xstate_buf2, xsave_test_mask, grand_change_data);
 		xrstor(xstate_buf2, xsave_test_mask);
 		_exit(0);
-	} else if (grandchild > 0) {
-		/* fork syscall succeeded, still in the first child. */
+	} else {
+		/* fork syscall succeeded, still in the child process. */
 		if (waitpid(grandchild, &status, 0) != grandchild ||
 			!WIFEXITED(status))
 			fatal_error("Grandchild exit with error status");
@@ -188,25 +188,21 @@ static int test_xstate_fork(void)
 	if (child < 0)
 		/* fork syscall failed */
 		fatal_error("fork failed");
-	if (child == 0) {
+	else if (child == 0) {
 		/* fork syscall succeeded, now in the child. */
 		printf("[RUN]Check xstate of child processs in process switching\n");
-		if (compare_buf((unsigned char *)xstate_buf0,
-			(unsigned char *)xstate_buf1, xstate_size))
+		if (memcmp(&xstate_buf0->bytes[0], &xstate_buf1->bytes[0], xstate_size))
 			printf("[FAIL]\tXstate of child process is not same as xstate of parent\n");
 		else
 			printf("[PASS]\tXstate of child process is same as xstate of parent\n");
 		for (cycle_num = 1; cycle_num <= CYCLE_MAX_NUM; cycle_num++) {
-			if(test_process_switch()) {
-				printf("[FAIL]\tChild xstate changed after process swiching.\n");
+			if(child_test_process_switch()) {
+				printf("[FAIL]\tChild xstate changed after process switching.\n");
 				_exit(0);
 			}
 		}
-
 		printf("[PASS]\tChild xstate is same after process swiching.\n");
-	}
-
-	if (child > 0) {
+	} else {
 		/* fork syscall succeeded, now in the parent. */
 		if (waitpid(child, &status, 0) != child || !WIFEXITED(status))
 			fatal_error("Child exit with error status");
