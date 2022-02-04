@@ -271,10 +271,9 @@ static uint32_t fill_xstate_range(int xstate_id, uint32_t xsave_mask)
 
 static inline void set_xstatebv(struct xsave_buffer *buffer, uint64_t bv)
 {
-	/* XSTATE_BV is at the beginning of the header: */
+	/* XSTATE_BV is at the beginning of xstate header. */
 	*(uint64_t *)(&buffer->header) = bv;
 }
-
 
 static uint64_t check_cpuid_xstate(void)
 {
@@ -308,64 +307,12 @@ static void fill_xstate_buf(char data, unsigned char *buf, int xstate_id)
 	}
 }
 
-void dump_buffer(unsigned char *buf, uint32_t size)
-{
-	int i, j;
-
-	printf("xsave size = %d (%03xh)\n", size, size);
-
-	for (i = 0; i < size; i += 16) {
-		printf("%04x: ", i);
-
-		for (j = i; ((j < i + 16) && (j < size)); j++)
-			printf("%02x ", buf[j]);
-		printf("\n");
-	}
-}
-
-void show_part_buf(unsigned char *buf0, unsigned char *buf1, int start,
-		int size)
-{
-	int c;
-
-	printf("%04x: ", start);
-	for (c = start; ((c < start + 16) && (c < size)); c++)
-		printf("%02x ", buf0[c]);
-	printf(" ->  ");
-	for (c = start; ((c < start + 16) && (c < size)); c++)
-		printf("%02x ", buf1[c]);
-	printf("\n");
-}
-
-int compare_buf(unsigned char *buf0, unsigned char *buf1, int size)
-{
-	int a, b, result_buf = NO_CHANGE;
-
-	for (a = 0; a < size; a += 16) {
-		for (b = a; ((b < a + 16) && (b < size)); b++) {
-			if (buf0[b] != buf1[b]) {
-				show_part_buf(buf0, buf1, a, size);
-				result_buf = CHANGE;
-				break;
-			}
-		}
-	}
-
-	return result_buf;
-}
-
-/*
- * Populate FP with values, becaue avoid GCC generate wrong FP instructions,
- * Fill in FP xstate with instructions, and xsave into buffer.
- */
+/* Populate FP xstate with values by instruction. */
 static inline void prepare_fp_buf(uint32_t ui32_fp)
 {
 	uint64_t ui64_fp;
 
-	/*
-	 * Populate ui32_fp and ui64_fp and so on value onto FP registers stack
-	 * and FP ST/MM xstates
-	 */
+	/* Populate ui32_fp and ui64_fp value onto FP registers stack. */
 	ui64_fp = (uint64_t)ui32_fp << 32;
 	asm volatile("finit");
 	ui64_fp = ui64_fp + ui32_fp;
@@ -373,6 +320,7 @@ static inline void prepare_fp_buf(uint32_t ui32_fp)
 	asm volatile("flds %0" : : "m" (ui32_fp));
 }
 
+/* Write PKRU xstate with values by instruction. */
 static inline void wrpkru(uint32_t pkey)
 {
 	uint32_t ecx = 0, edx = 0;
@@ -381,43 +329,35 @@ static inline void wrpkru(uint32_t pkey)
 	     : : "a" (pkey), "c" (ecx), "d" (edx));
 }
 
-static void set_xstate_data(struct xsave_buffer *buf, uint32_t xsave_mask)
+static void set_xstate_data(struct xsave_buffer *buf, uint32_t xsave_mask,
+	uint32_t int_data)
 {
 	unsigned char *ptr = (unsigned char *)buf;
-	/* MM offset and MM and XMM size is mandatory */
-	uint32_t xmm_offset = 160, xmm_size = 256, i, rand;
-	uint8_t data;
-	struct timeval tv;
+	/* XMM offset and size are fixed */
+	uint32_t xmm_offset = 160, xmm_size = 256, i, pkru_data;
+	uint8_t byte_data;
 
-	if (gettimeofday(&tv, NULL))
-		fatal_error("gettimeofday failed");
-
-	/*
-	 * Ensure that 'data' is never 0.  This ensures that
-	 * the registers are never in their initial configuration
-	 * and thus never tracked as being in the init state.
-	 */
-	data = (tv.tv_usec & 0xff) | 1;
-	rand = (((tv.tv_usec & 0xffff) << 16) | data << 8);
-	prepare_fp_buf(rand);
+	pkru_data = int_data << 8;
+	byte_data = int_data && 0xff;
+	prepare_fp_buf(int_data);
 	xsave(buf, XFEATURE_MASK_FP);
 	xrstor(buf, XFEATURE_MASK_FP);
-	/* MXCSR_MASK should set to 0x0000ffff for XMM xstate. */
+	/* MXCSR_MASK should set to 0x0000ffff for SSE component. */
 	ptr[28]=0xff;
 	ptr[29]=0xff;
 	if (xstate_data.xstate_flag[XFEATURE_PKRU] == SUPPORT) {
-		wrpkru(rand);
+		wrpkru(pkru_data);
 		xsave(buf, XFEATURE_MASK_FP | XFEATURE_MASK_PKRU);
 		xrstor(buf, XFEATURE_MASK_FP | XFEATURE_MASK_PKRU);
 	}
 
-	/* Fill XMM with random data value */
+	/* Fill XMM with specific byte data value */
 	for (i = 0; i < xmm_size; i++)
-		ptr[xmm_offset + i] = data;
+		ptr[xmm_offset + i] = byte_data;
 
 	set_xstatebv(buf, xsave_mask);
-	fill_xstate_buf(data, ptr, (int)XFEATURE_YMM);
-	fill_xstate_buf(data, ptr, (int)XFEATURE_OPMASK);
+	fill_xstate_buf(byte_data, ptr, (int)XFEATURE_YMM);
+	fill_xstate_buf(byte_data, ptr, (int)XFEATURE_OPMASK);
 }
 
 static inline long long execute_syscall(int syscall64_num, long long rdi,
@@ -445,23 +385,33 @@ static inline long long execute_syscall(int syscall64_num, long long rdi,
 
 /*
  * Because xstate like XMM, YMM registers are not preserved across function
- * calls, so use inline function with assembly code only in this function.
+ * calls, so use inline function with assembly code only for fork test.
  */
-static inline long long xsave_syscall_test(unsigned char *buf1,
-	unsigned char *buf2, uint64_t xsave_mask ,int syscall64_num,
-	long long rdi, long long rsi, long long rdx, long long r10,
-	long long r8, long long r9)
+static inline long long fork_test(struct xsave_buffer *buf, uint64_t xsave_mask)
 {
 	long long ret;
 
-	/* Xrstor target xstate buffer in buf1 */
-	xrstor((struct xsave_buffer *)buf1, xsave_mask);
+	ret = execute_syscall((int)SYS_fork, 0, 0, 0, 0, 0, 0);
 
-	/* Execute target syscall */
-	ret = execute_syscall(syscall64_num, rdi, rsi, rdx, r10, r8, r9);
+	/* Save the xstates in buf */
+	xsave((struct xsave_buffer *)buf, xsave_mask);
+
+	return ret;
+}
+
+/*
+ * Because xstate like XMM, YMM registers are not preserved across function
+ * calls, so use inline function with assembly code only for singal test.
+ */
+static inline long long sig_test(struct xsave_buffer *buf, uint64_t xsave_mask,
+	long long process_pid, long long SIG)
+{
+	long long ret;
+
+	ret = execute_syscall((int)SYS_kill, process_pid, SIG, 0, 0, 0, 0);
 
 	/* Save the xstates in buf2 */
-	xsave((struct xsave_buffer *)buf2, xsave_mask);
+	xsave((struct xsave_buffer *)buf, xsave_mask);
 
 	return ret;
 }
