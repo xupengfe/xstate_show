@@ -131,6 +131,10 @@ static int test_xstate_sig_handle(void)
 		printf("[PASS]\tProcess xstate is same after signal handling.\n");
 	clearhandler(SIGUSR1);
 	clearhandler(SIGUSR2);
+	/* Keep initialized xstate_buf0 and clear other buffers for comparison. */
+	memset(xstate_buf1, 0, xstate_size);
+	memset(xstate_buf2, 0, xstate_size);
+	memset(xstate_buf3, 0, xstate_size);
 
 	return 0;
 }
