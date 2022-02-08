@@ -377,7 +377,7 @@ static void set_xstate_data(struct xsave_buffer *buf, uint32_t xsave_mask,
 	uint8_t byte_data;
 
 	pkru_data = int_data << 8;
-	byte_data = int_data && 0xff;
+	byte_data = int_data & 0xff;
 	prepare_fp_buf(int_data);
 	/* Fill fp xstates values into xstate buffer (0-159 bytes) */
 	xsave(buf, XFEATURE_MASK_FP);
