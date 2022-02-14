@@ -512,9 +512,9 @@ static inline bool __validate_xstate_regs(struct xsave_buffer *buf0)
 	/* Clear xstate_buf_compare for next test */
 	memset(xstate_buf_compare, 0, xstate_size);
 
-	if (ret == 0) {
+	if (ret == 0)
 		return false;
-	}
+
 	return true;
 }
 
