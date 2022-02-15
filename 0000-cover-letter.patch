@@ -1,0 +1,119 @@
+From 54882a09eb2385b846fa2f03919bbf754e9f260e Mon Sep 17 00:00:00 2001
+Message-Id: <cover.1646290295.git.pengfei.xu@intel.com>
+From: Pengfei Xu <pengfei.xu@intel.com>
+Date: Thu, 3 Mar 2022 14:51:35 +0800
+Subject: [PATCH v8 0/1] Introduce XSAVE feature self-test
+
+The XSAVE feature set supports the saving and restoring of xstate components,
+which is used for process context switching. The state components include
+x87 state for FPU execution environment, SSE state, AVX state and so on.
+In order to ensure that XSAVE works correctly, add XSAVE basic test for XSAVE
+architecture functionality.
+
+This patch set tests and verifies the basic functions of XSAVE in user
+space; it tests "FPU, SSE(XMM), AVX2(YMM), AVX512_OPMASK/AVX512_ZMM_Hi256/
+AVX512_Hi16_ZMM and PKRU parts" xstates with following cases:
+1. The content of these xstates in the process should not change after the
+   signal handling.
+2. The content of these xstates in the child process should be the same as
+   those of the parent process after fork syscall.
+
+This is the xstates position for FP, SSE(XMM), Header, YMM, AVX512_OPMASK/
+AVX512_ZMM_Hi256/AVX512_Hi16_ZMM and PKRU, it can be saved/restored by
+xsave/xrstor instructions, and mask could control which part will be
+saved/restored:
+FP              (0 - 159 bytes)
+XMM             (160-415 bytes)
+Reserved        (416-511 bytes  SDM vol1 13.4.1)
+Header_used     (512-527 bytes, XSTATE BV(bitmap vector) mask:512-519 bytes)
+Headed_reserved (528-575 bytes must be 00)
+YMM             (Offset:CPUID.(EAX=0D,ECX=2).EBX  Size:CPUID(EAX=0D,ECX=2).EAX)
+AVX512_OPMASK   (Offset:CPUID.(EAX=0D,ECX=5).EBX  Size:CPUID(EAX=0D,ECX=5).EAX)
+ZMM_Hi256       (Offset:CPUID.(EAX=0D,ECX=6).EBX  Size:CPUID(EAX=0D,ECX=6).EAX)
+Hi16_ZMM        (Offset:CPUID.(EAX=0D,ECX=7).EBX  Size:CPUID(EAX=0D,ECX=7).EAX)
+PKRU            (Offset:CPUID.(EAX=0D,ECX=9).EBX  Size:CPUID(EAX=0D,ECX=9).EAX)
+
+Becasue xstate like XMM will not be preserved across function calls, it uses
+assembly instruction to call a system call of fork or raise signal, and uses
+the "inline" keyword in key test functions.
+To prevent GCC from generating any FP/XMM/AVX/PKRU code by mistake, add
+"-mno-sse -mno-mmx -mno-sse2 -mno-avx -mno-pku" compiler arguments to avoid
+spurious failure, so test code can't use <stdlib.h> because of "-mno-sse"
+compile parameter. Thanks Dave, Hansen for above suggestion.
+
+This series introduces only the most basic XSAVE tests. In the future, the
+intention is to continue expanding the scope of these selftests to include
+more xstates and kernel XSAVE-related functional tests.
+
+Many thanks to Bae, Chang Seok for a bunch of comments!
+
+========
+- Change from v7 to v8
+  Many thanks to Bae, Chang Seok for a bunch of comments as follow:
+  - Use the filling buffer way to prepare the xstate buffer, and use xrstor
+    instruction way to load the tested xstates.
+  - Remove useless dump_buffer, compare_buffer functions.
+  - Improve the struct of xstate_info.
+  - Added AVX512_ZMM_Hi256 and AVX512_Hi16_ZMM components in xstate test.
+  - Remove redundant xstate_info.xstate_mask, xstate_flag[], and
+    xfeature_test_mask, use xstate_info.mask instead.
+  - Check if xfeature is supported outside of fill_xstate_buf() , this change
+    is easier to read and understand.
+  - Remove useless wrpkru, only use filling all tested xstate buffer in
+    fill_xstates_buf().
+  - Improve a bunch of function names and variable names.
+  - Improve test step flow for readability.
+
+- Change from v6 to v7:
+  - Added the error number and error description of the reason for the
+    failure, thanks Shuah Khan's suggestion.
+  - Added a description of what these tests are doing in the head comments.
+  - Added changes update in the head comments.
+  - Added description of the purpose of the function. thanks Shuah Khan.
+
+- Change from v5 to v6:
+  - In order to prevent GCC from generating any FP code by mistake,
+    "-mno-sse -mno-mmx -mno-sse2 -mno-avx -mno-pku" compiler parameter was
+    added, it's referred to the parameters for compiling the x86 kernel. Thanks
+    Dave Hansen's suggestion.
+  - Removed the use of "kselftest.h", because kselftest.h included <stdlib.h>,
+    and "stdlib.h" would use sse instructions in it's libc, and this *XSAVE*
+    test needed to be compiled without libc sse instructions(-mno-sse).
+  - Improved the description in commit header, thanks Chen Yu's suggestion.
+  - Becasue test code could not use buildin xsave64 in libc without sse, added
+    xsave function by instruction way.
+  - Every key test action would not use libc(like printf) except syscall until
+    it's failed or done. If it's failed, then it would print the failed reason.
+  - Used __cpuid_count() instead of native_cpuid(), becasue __cpuid_count()
+    was a macro definition function with one instruction in libc and did not
+    change xstate. Thanks Chatre Reinette, Shuah Khan.
+    https://lore.kernel.org/linux-sgx/8b7c98f4-f050-bc1c-5699-fa598ecc66a2@linuxfoundation.org/
+
+- Change from v4 to v5:
+  - Moved code files into tools/testing/selftests/x86.
+  - Delete xsave instruction test, becaue it's not related to kernel.
+  - Improved case description.
+  - Added AVX512 opmask change and related XSAVE content verification.
+  - Added PKRU part xstate test into instruction and signal handling test.
+  - Added XSAVE process swich test for FPU, AVX2, AVX512 opmask and PKRU part.
+
+- Change from v3 to v4:
+  - Improve the comment in patch 1.
+
+- Change from v2 to v3:
+  - Improve the description of patch 2 git log.
+
+- Change from v1 to v2:
+  - Improve the cover-letter. Thanks Dave Hansen's suggestion.
+
+Pengfei Xu (1):
+  xstate.c: improve the xstate.c in v10
+
+ x86/Makefile |   3 +-
+ x86/xstate.c | 575 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 577 insertions(+), 1 deletion(-)
+ create mode 100644 x86/xstate.c
+
+-- 
+2.31.1
+
