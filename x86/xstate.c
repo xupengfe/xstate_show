@@ -271,7 +271,7 @@ static void retrieve_xstate_info(uint32_t xstate_id)
 	 */
 	xstate_info.xstate_size[xstate_id] = eax;
 	xstate_info.xstate_offset[xstate_id] = ebx;
-	xstate_info.xstate_mask = xstate_info.xstate_mask |	(1 << xstate_id);
+	xstate_info.xstate_mask = xstate_info.xstate_mask | (1 << xstate_id);
 }
 
 static inline void set_xstatebv(struct xsave_buffer *buffer, uint64_t bv)
