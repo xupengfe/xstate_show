@@ -447,9 +447,9 @@ static void fill_xstates_buf(struct xsave_buffer *buf, uint32_t xsave_mask)
  * Because xstate like XMM, YMM registers are not preserved across function
  * calls, so use inline function with assembly code only for fork syscall.
  */
-static inline long long __fork(void)
+static inline long __fork(void)
 {
-	long long ret, nr = SYS_fork;
+	long ret, nr = SYS_fork;
 
 	asm volatile("syscall"
 		 : "=a" (ret)
@@ -463,16 +463,15 @@ static inline long long __fork(void)
  * Because xstate like XMM, YMM registers are not preserved across function
  * calls, so use inline function with assembly code only to raise signal.
  */
-static inline long long __raise(long long pid_num, long long sig_num)
+static inline long __raise(long pid_num, long sig_num)
 {
-	long long ret, nr = SYS_kill;
+	long ret, nr = SYS_kill;
 
-	register long long arg1 asm("rdi") = pid_num;
-	register long long arg2 asm("rsi") = sig_num;
-
+	asm volatile ("movq %0, %%rdi" : : "r"(pid_num) : "%rdi");
+	asm volatile ("movq %0, %%rsi" : : "r"(sig_num) : "%rsi");
 	asm volatile("syscall"
 		 : "=a" (ret)
-		 : "a" (nr), "b" (nr), "r" (arg1), "r" (arg2)
+		 : "a" (nr), "b" (nr)
 		 : "rcx", "r11", "memory", "cc");
 
 	return ret;
@@ -539,9 +538,16 @@ static void test_xstate_fork(void)
 			printf("[PASS]\tXstate of child process:%d is same as xstate of parent.\n",
 				getpid());
 		}
-	} else {
+	} else  {
+		/* Fork syscall succeeded, now in the parent. */
+		__xsave(compared_xbuf, xstate_info.mask);
 		if (waitpid(child, &status, 0) != child || !WIFEXITED(status))
 			fatal_error("Child exit with error status");
+		if (memcmp(&valid_xbuf->bytes[0], &compared_xbuf->bytes[0],
+			xstate_size)) {
+			printf("[FAIL]\tParent xstate changed after process switching.\n");
+		} else
+			printf("[PASS]\tParent xstate is same after process switching.\n");
 	}
 }
 
