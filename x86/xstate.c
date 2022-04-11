@@ -356,17 +356,10 @@ static void fill_xstate_buf(uint8_t test_byte, unsigned char *buf,
 		buf[xstate_info.offset[xfeature_num] + i] = test_byte;
 }
 
-static inline void prepare_fp_buf(uint32_t ui32_fp)
+static inline void prepare_fp_buf(uint64_t ui64_fp)
 {
-	uint64_t ui64_fp;
-
-	/*
-	 * Populate ui32_fp and ui64_fp and so on value onto FP registers stack
-	 * and FP ST/MM xstates
-	 */
-	ui64_fp = (uint64_t)ui32_fp << 32;
+	/* Populate ui64_fp value onto FP registers stack ST0-7. */
 	asm volatile("finit");
-	ui64_fp = ui64_fp + ui32_fp;
 	asm volatile("fldl %0" : : "m" (ui64_fp));
 	asm volatile("fldl %0" : : "m" (ui64_fp));
 	asm volatile("fldl %0" : : "m" (ui64_fp));
@@ -425,7 +418,7 @@ static void fill_xstates_buf(struct xsave_buffer *buf, uint32_t xsave_mask)
 	/* Fill fp x87 state: MXCSR and MXCSR_MASK data(0-159 bytes) into buffer. */
 	//memcpy(buf, fp_data, FP_SIZE);
 	/* It's debug and verify version to check the fp data! */
-	prepare_fp_buf(0x1f2f3f4f);
+	prepare_fp_buf(0x1f2f3f4f1f2f3f4f);
 	__xsave(buf, xstate_info.mask);
 
 	/*
