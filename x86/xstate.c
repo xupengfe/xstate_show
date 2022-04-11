@@ -420,10 +420,10 @@ static void fill_xstates_buf(struct xsave_buffer *buf, uint32_t xsave_mask)
 		0xf2, 0x3d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
 
 	/* Clean the buffer with all 0 first. */
-	//memset(buf, 0, xstate_size);
+	memset(buf, 0, xstate_size);
 
 	/* Fill fp x87 state: MXCSR and MXCSR_MASK data(0-159 bytes) into buffer. */
-	memcpy(buf, fp_data, FP_SIZE);
+	//memcpy(buf, fp_data, FP_SIZE);
 	/* It's debug and verify version to check the fp data! */
 	prepare_fp_buf(0x1f2f3f4f);
 	__xsave(buf, xstate_info.mask);
