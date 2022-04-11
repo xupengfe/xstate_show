@@ -347,15 +347,6 @@ static void check_cpuid_xstate_info(void)
 	}
 }
 
-static void fill_xstate_buf(uint8_t test_byte, unsigned char *buf,
-			    int xfeature_num)
-{
-	uint32_t i;
-
-	for (i = 0; i < xstate_info.size[xfeature_num]; i++)
-		buf[xstate_info.offset[xfeature_num] + i] = test_byte;
-}
-
 static inline void prepare_fp_buf(uint64_t ui64_fp)
 {
 	/* Populate ui64_fp value onto FP registers stack ST0-7. */
@@ -388,7 +379,7 @@ void dump_buffer(unsigned char *buf, int size)
 /* Fill FP/XMM/YMM/OPMASK and PKRU xstates into buffer. */
 static void fill_xstates_buf(struct xsave_buffer *buf, uint32_t xsave_mask)
 {
-	uint32_t i;
+	uint32_t xfeature_num;
 	/* The data of FP x87 state are as follows. */
 	unsigned char fp_data[160] = {
 		0x7f, 0x03, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00,
@@ -425,8 +416,9 @@ static void fill_xstates_buf(struct xsave_buffer *buf, uint32_t xsave_mask)
 	 * Fill test byte value into XMM xstate buffer(160-415 bytes).
 	 * xstate 416-511 bytes are reserved as 0.
 	 */
-	for (i = 0; i < XMM_SIZE; i++)
-		*((unsigned char *)buf + XMM_OFFSET + i) = XSTATE_TESTBYTE;
+	memset((unsigned char *)buf + XMM_OFFSET, XSTATE_TESTBYTE, XMM_SIZE);
+	//for (i = 0; i < XMM_SIZE; i++)
+	//	*((unsigned char *)buf + XMM_OFFSET + i) = XSTATE_TESTBYTE;
 
 	/*
 	 * Fill xstate-component bitmap(512-519 bytes) into xstate header.
@@ -434,29 +426,20 @@ static void fill_xstates_buf(struct xsave_buffer *buf, uint32_t xsave_mask)
 	 */
 	set_xstatebv(buf, xsave_mask);
 
-	/* Fill test byte value into YMM xstate buffer(YMM offset/size). */
-	if (xstate_tested(XFEATURE_YMM))
-		fill_xstate_buf(XSTATE_TESTBYTE, (unsigned char *)buf, XFEATURE_YMM);
+	/* Fill test byte value into each tested xstate buffer(offset/size). */
+	for (xfeature_num = XFEATURE_YMM; xfeature_num < XFEATURE_MAX;
+		xfeature_num++) {
+		if (xstate_tested(xfeature_num)) {
+			if (xfeature_num == XFEATURE_PKRU) {
+				/* Only 0-3 bytes of pkru xstates are allowed to be written. */
+				memset((unsigned char *)buf + xstate_info.offset[XFEATURE_PKRU],
+					PKRU_TESTBYTE, sizeof(uint32_t));
+				continue;
+			}
 
-	/*
-	 * Fill test byte value into AVX512 OPMASK/ZMM xstates buffer
-	 * (AVX512_OPMASK/ZMM_Hi256/Hi16_ZMM offset/size).
-	 */
-	if (xstate_tested(XFEATURE_OPMASK))
-		fill_xstate_buf(XSTATE_TESTBYTE, (unsigned char *)buf, XFEATURE_OPMASK);
-	if (xstate_tested(XFEATURE_ZMM_Hi256)) {
-		fill_xstate_buf(XSTATE_TESTBYTE, (unsigned char *)buf,
-				XFEATURE_ZMM_Hi256);
-	}
-	if (xstate_tested(XFEATURE_Hi16_ZMM)) {
-		fill_xstate_buf(XSTATE_TESTBYTE, (unsigned char *)buf,
-				XFEATURE_Hi16_ZMM);
-	}
-
-	if (xstate_tested(XFEATURE_PKRU)) {
-		/* Only 0-3 bytes of pkru xstates are allowed to be written. */
-		memset((unsigned char *)buf + xstate_info.offset[XFEATURE_PKRU],
-			PKRU_TESTBYTE, sizeof(uint32_t));
+			memset((unsigned char *)buf + xstate_info.offset[xfeature_num],
+				XSTATE_TESTBYTE, xstate_info.size[xfeature_num]);
+		}
 	}
 }
 
