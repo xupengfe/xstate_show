@@ -23,14 +23,12 @@
  * Hi16_ZMM       (Offset:CPUID.(EAX=0D,ECX=7).EBX Size:CPUID(EAX=0D,ECX=7).EAX)
  * PKRU           (Offset:CPUID.(EAX=0D,ECX=9).EBX Size:CPUID(EAX=0D,ECX=9).EAX)
  *
- * Becasue xstate like XMM will not be preserved across function calls, it uses
+ * Because xstate like XMM will not be preserved across function calls, it uses
  * assembly instruction to call a system call of fork or raise signal, and uses
  * the "inline" keyword in key test functions.
- * To prevent GCC from generating any FP/SSE(XMM)/AVX/PKRU code by mistake, add
- * "-mno-sse -mno-mmx -mno-sse2 -mno-avx -mno-pku" compiler arguments to avoid
- * spurious failure, so test code can't use <stdlib.h> because of "-mno-sse"
- * compile parameter. Not using <stdlib.h> makes it impossible to use
- * "kselftest.h", and it requires a declaration that defines *aligned_alloc().
+ * To prevent GCC from generating any FP/SSE(XMM)/AVX/PKRU code, add
+ * "-mno-sse -mno-mmx -mno-sse2 -mno-avx -mno-pku" compiler arguments. stdlib.h
+ * can not be used because of the "-mno-sse" option.
  */
 
 #define _GNU_SOURCE
@@ -51,7 +49,6 @@ struct xsave_buffer *valid_xbuf, *compared_xbuf;
 static uint32_t xstate_size;
 static bool sigusr1_done;
 
-/* Populate xstate with byte 0x8f. */
 #define XSTATE_TESTBYTE 0x8f
 /* Bits 0-1 in first byte of PKRU must be 0 for RW access to linear address. */
 #define PKRU_TESTBYTE 0xfc
@@ -81,7 +78,6 @@ static bool sigusr1_done;
 #define CPUID_LEAF7_EBX_AVX2_MASK	(1U << 5) /* AVX2 instructions */
 #define CPUID_LEAF7_EBX_AVX512F_MASK	(1U << 16) /* AVX-512 Foundation */
 
-#define CPUID_LEAF7_ECX_PKU_MASK   (1U << 3) /* Protection Keys for Userspace */
 #define CPUID_LEAF7_ECX_OSPKE_MASK (1U << 4) /* OS Protection Keys Enable */
 
 #define CPUID_LEAF_XSTATE		0xd
@@ -99,44 +95,41 @@ static bool sigusr1_done;
 #define fatal_error(msg, ...)	err(1, "[FAIL]\t" msg, ##__VA_ARGS__)
 
 /*
- * XMM will be tested and compiled with -mno-sse to avoid XMM effects, which
- * makes stdlib.h unusable, so define declaration here to avoid warning.
+ * While this function prototype is in the stdlib.h, the header file cannot be
+ * included with the -mno-sse option.
  */
 void *aligned_alloc(size_t alignment, size_t size);
 
-enum support_type {
+enum supportability {
 	NOT_SUPPORT,
 	SUPPORT,
 };
 
 /* It's from arch/x86/kernel/fpu/xstate.c. */
 static const char * const xfeature_names[] = {
-		"x87 floating point registers",
-		"SSE registers",
-		"AVX registers",
-		"MPX bounds registers",
-		"MPX CSR",
-		"AVX-512 opmask",
-		"AVX-512 Hi256",
-		"AVX-512 ZMM_Hi256",
-		"Processor Trace (unused)",
-		"Protection Keys User registers",
-		"PASID state",
-		"unknown xstate feature",
-		"unknown xstate feature",
-		"unknown xstate feature",
-		"unknown xstate feature",
-		"unknown xstate feature",
-		"unknown xstate feature",
-		"AMX Tile config",
-		"AMX Tile data",
-		"unknown xstate feature",
+	"x87 floating point registers",
+	"SSE registers",
+	"AVX registers",
+	"MPX bounds registers",
+	"MPX CSR",
+	"AVX-512 opmask",
+	"AVX-512 Hi256",
+	"AVX-512 ZMM_Hi256",
+	"Processor Trace (unused)",
+	"Protection Keys User registers",
+	"PASID state",
+	"unknown xstate feature",
+	"unknown xstate feature",
+	"unknown xstate feature",
+	"unknown xstate feature",
+	"unknown xstate feature",
+	"unknown xstate feature",
+	"AMX Tile config",
+	"AMX Tile data",
+	"unknown xstate feature",
 };
 
-/*
- * It's from arch/x86/include/asm/fpu/types.h
- * List of XSAVE features Linux knows about:
- */
+/* List of XSAVE features Linux knows about. */
 enum xfeature {
 	XFEATURE_FP,
 	XFEATURE_SSE,
@@ -191,10 +184,14 @@ static inline void check_cpuid_xsave_availability(void)
 	 * XGETBV.
 	 */
 	__cpuid_count(1, 0, eax, ebx, ecx, edx);
-	if (!(ecx & CPUID_LEAF1_ECX_XSAVE_MASK))
-		fatal_error("cpuid: no CPU xsave support");
-	if (!(ecx & CPUID_LEAF1_ECX_OSXSAVE_MASK))
-		fatal_error("cpuid: no OS xsave support");
+	if (!(ecx & CPUID_LEAF1_ECX_XSAVE_MASK)) {
+		printf("[SKIP]\tcpuid: CPU doesn't support xsave.\n");
+		_exit(0);
+	}
+	if (!(ecx & CPUID_LEAF1_ECX_OSXSAVE_MASK)) {
+		printf("[SKIP]\tcpuid: CPU doesn't support OS xsave.\n");
+		_exit(0);
+	}
 }
 
 static inline bool xstate_tested(int xfeature_num)
@@ -228,8 +225,6 @@ static inline int cpu_has_pkeys(void)
 
 	/* CPUID.7.0:ECX.PKU[bit 3]: the support for PKRU instructions */
 	__cpuid_count(7, 0, eax, ebx, ecx, edx);
-	if (!(ecx & CPUID_LEAF7_ECX_PKU_MASK))
-		return NOT_SUPPORT;
 	/* CPUID.7.0:ECX.OSPKE[bit 4]: the support for OS set CR4.PKE */
 	if (!(ecx & CPUID_LEAF7_ECX_OSPKE_MASK))
 		return NOT_SUPPORT;
@@ -242,7 +237,7 @@ static uint32_t get_xstate_size(void)
 	uint32_t eax, ebx, ecx, edx;
 
 	__cpuid_count(CPUID_LEAF_XSTATE, CPUID_SUBLEAF_XSTATE_USER, eax, ebx,
-		ecx, edx);
+		      ecx, edx);
 	/*
 	 * EBX enumerates the size (in bytes) required by the XSAVE
 	 * instruction for an XSAVE area containing all the user state
@@ -340,7 +335,7 @@ static void check_cpuid_xstate_info(void)
 
 	if (cpu_has_avx512f()) {
 		xstate_info.mask |= XFEATURE_MASK_OPMASK | XFEATURE_MASK_ZMM_Hi256 |
-			XFEATURE_MASK_Hi16_ZMM;
+				    XFEATURE_MASK_Hi16_ZMM;
 		retrieve_xstate_size_and_offset(XFEATURE_OPMASK);
 		retrieve_xstate_size_and_offset(XFEATURE_ZMM_Hi256);
 		retrieve_xstate_size_and_offset(XFEATURE_Hi16_ZMM);
@@ -353,12 +348,48 @@ static void check_cpuid_xstate_info(void)
 }
 
 static void fill_xstate_buf(uint8_t test_byte, unsigned char *buf,
-	int xfeature_num)
+			    int xfeature_num)
 {
 	uint32_t i;
 
 	for (i = 0; i < xstate_info.size[xfeature_num]; i++)
 		buf[xstate_info.offset[xfeature_num] + i] = test_byte;
+}
+
+static inline void prepare_fp_buf(uint32_t ui32_fp)
+{
+	uint64_t ui64_fp;
+
+	/*
+	 * Populate ui32_fp and ui64_fp and so on value onto FP registers stack
+	 * and FP ST/MM xstates
+	 */
+	ui64_fp = (uint64_t)ui32_fp << 32;
+	asm volatile("finit");
+	ui64_fp = ui64_fp + ui32_fp;
+	asm volatile("fldl %0" : : "m" (ui64_fp));
+	asm volatile("fldl %0" : : "m" (ui64_fp));
+	asm volatile("fldl %0" : : "m" (ui64_fp));
+	asm volatile("fldl %0" : : "m" (ui64_fp));
+	asm volatile("fldl %0" : : "m" (ui64_fp));
+	asm volatile("fldl %0" : : "m" (ui64_fp));
+	asm volatile("fldl %0" : : "m" (ui64_fp));
+	asm volatile("fldl %0" : : "m" (ui64_fp));
+}
+
+void dump_buffer(unsigned char *buf, int size)
+{
+	int i, j;
+
+	printf("xsave size = %d (%03xh)\n", size, size);
+
+	for (i = 0; i < size; i += 16) {
+		printf("%04x: ", i);
+
+		for (j = i; ((j < i + 16) && (j < size)); j++)
+			printf("%02x ", buf[j]);
+		printf("\n");
+	}
 }
 
 /* Fill FP/XMM/YMM/OPMASK and PKRU xstates into buffer. */
@@ -389,10 +420,13 @@ static void fill_xstates_buf(struct xsave_buffer *buf, uint32_t xsave_mask)
 		0xf2, 0x3d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
 
 	/* Clean the buffer with all 0 first. */
-	memset(buf, 0, xstate_size);
+	//memset(buf, 0, xstate_size);
 
 	/* Fill fp x87 state: MXCSR and MXCSR_MASK data(0-159 bytes) into buffer. */
 	memcpy(buf, fp_data, FP_SIZE);
+	/* It's debug and verify version to check the fp data! */
+	prepare_fp_buf(0x1f2f3f4f);
+	__xsave(buf, xstate_info.mask);
 
 	/*
 	 * Fill test byte value into XMM xstate buffer(160-415 bytes).
@@ -419,11 +453,11 @@ static void fill_xstates_buf(struct xsave_buffer *buf, uint32_t xsave_mask)
 		fill_xstate_buf(XSTATE_TESTBYTE, (unsigned char *)buf, XFEATURE_OPMASK);
 	if (xstate_tested(XFEATURE_ZMM_Hi256)) {
 		fill_xstate_buf(XSTATE_TESTBYTE, (unsigned char *)buf,
-			XFEATURE_ZMM_Hi256);
+				XFEATURE_ZMM_Hi256);
 	}
 	if (xstate_tested(XFEATURE_Hi16_ZMM)) {
 		fill_xstate_buf(XSTATE_TESTBYTE, (unsigned char *)buf,
-			XFEATURE_Hi16_ZMM);
+				XFEATURE_Hi16_ZMM);
 	}
 
 	if (xstate_tested(XFEATURE_PKRU)) {
@@ -547,6 +581,7 @@ static void prepare_xbuf(void)
 	compared_xbuf = alloc_xbuf(xstate_size);
 	/* Populate the specified data into the validate xstate buffer. */
 	fill_xstates_buf(valid_xbuf, xstate_info.mask);
+	dump_buffer((unsigned char*)valid_xbuf, xstate_size);
 }
 
 static void show_tested_xfeatures(void)
